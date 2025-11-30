@@ -210,3 +210,70 @@ def set_seed(seed: int = 42):
         torch.cuda.manual_seed_all(seed)
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
+
+
+def impute(
+    model,
+    dataset,
+    n_samples: int = 1000,
+    batch_size: int = 64,
+    device: Optional[torch.device] = None,
+    verbose: bool = False
+) -> np.ndarray:
+    """
+    Impute missing values using a trained model.
+    
+    Takes a TensorDataset and returns the data with missing values imputed
+    by the model while preserving original observed values.
+    
+    Args:
+        model: Trained NotMIWAE or MIWAE model
+        dataset: TensorDataset containing (x_filled, mask) tensors
+        n_samples: Number of importance samples for imputation
+        batch_size: Batch size for processing (for GPU/CPU efficiency)
+        device: Device to use for computation
+        verbose: Whether to print progress
+        
+    Returns:
+        x_imputed: Data with missing values imputed (observed values preserved)
+        
+    Example:
+        >>> from notmiwae_pytorch.utils import impute
+        >>> from torch.utils.data import TensorDataset
+        >>> 
+        >>> # Create Dataset
+        >>> dataset = TensorDataset(x_filled, mask)
+        >>> 
+        >>> # After training your model
+        >>> x_imputed = impute(model, dataset, n_samples=1000, batch_size=64)
+    """
+    if device is None:
+        device = next(model.parameters()).device
+    
+    # Extract tensors from dataset
+    x_filled = dataset.tensors[0]
+    mask = dataset.tensors[1]
+    
+    n = x_filled.shape[0]
+    n_batches = (n + batch_size - 1) // batch_size
+    
+    model.eval()
+    x_imputed_list = []
+    
+    with torch.no_grad():
+        for i in range(0, n, batch_size):
+            end_idx = min(i + batch_size, n)
+            x_batch = x_filled[i:end_idx].to(device)
+            s_batch = mask[i:end_idx].to(device)
+            
+            # Model's impute method already preserves observed values
+            x_imp = model.impute(x_batch, s_batch, n_samples=n_samples)
+            x_imputed_list.append(x_imp.cpu())
+            
+            if verbose:
+                batch_idx = i // batch_size + 1
+                print(f"Imputing batch {batch_idx}/{n_batches}")
+    
+    x_imputed = torch.cat(x_imputed_list, dim=0).numpy()
+    
+    return x_imputed

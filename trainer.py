@@ -11,6 +11,7 @@ where:
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 import numpy as np
@@ -30,6 +31,9 @@ class Trainer:
         device: Device ('cuda' or 'cpu')
         log_dir: Directory for TensorBoard logs
         checkpoint_dir: Directory for model checkpoints
+        original_data_available: If True, expects (x_filled, mask, x_original) from DataLoader
+                                  and tracks imputation RMSE during training
+        rmse_n_samples: Number of importance samples for RMSE computation (default: 50)
     """
     
     def __init__(
@@ -38,10 +42,14 @@ class Trainer:
         lr: float = 1e-3,
         device: Optional[str] = None,
         log_dir: str = './runs',
-        checkpoint_dir: str = './checkpoints'
+        checkpoint_dir: str = './checkpoints',
+        original_data_available: bool = False,
+        rmse_n_samples: int = 50
     ):
         self.model = model
         self.lr = lr
+        self.original_data_available = original_data_available
+        self.rmse_n_samples = rmse_n_samples
         
         if device is None:
             self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -101,6 +109,12 @@ class Trainer:
         if has_missing_model:
             metrics['log_p_s_given_x'] = 0.0
         
+        # For RMSE tracking
+        if self.original_data_available:
+            all_x_original = []
+            all_x_imputed = []
+            all_mask = []
+        
         for batch in train_loader:
             x, s = batch[0].to(self.device), batch[1].to(self.device)
             
@@ -119,10 +133,33 @@ class Trainer:
             if has_missing_model:
                 metrics['log_p_s_given_x'] += output['log_p_s_given_x'].item()
             
+            # Collect data for RMSE computation
+            if self.original_data_available:
+                x_original = batch[2].to(self.device)
+                with torch.no_grad():
+                    x_imputed = self.model.impute(x, s, n_samples=self.rmse_n_samples)
+                all_x_original.append(x_original.cpu())
+                all_x_imputed.append(x_imputed.cpu())
+                all_mask.append(s.cpu())
+            
             self.global_step += 1
             
         for key in metrics:
             metrics[key] /= len(train_loader)
+        
+        # Compute RMSE
+        if self.original_data_available:
+            x_original_all = torch.cat(all_x_original, dim=0)
+            x_imputed_all = torch.cat(all_x_imputed, dim=0)
+            mask_all = torch.cat(all_mask, dim=0)
+            missing_mask = (1 - mask_all).bool()
+            if missing_mask.sum() > 0:
+                squared_errors = (x_original_all - x_imputed_all) ** 2
+                mse = squared_errors[missing_mask].mean()
+                metrics['rmse'] = torch.sqrt(mse).item()
+            else:
+                metrics['rmse'] = 0.0
+        
         return metrics
     
     @torch.no_grad()
@@ -135,6 +172,12 @@ class Trainer:
         if has_missing_model:
             metrics['log_p_s_given_x'] = 0.0
         
+        # For RMSE tracking
+        if self.original_data_available:
+            all_x_original = []
+            all_x_imputed = []
+            all_mask = []
+        
         for batch in val_loader:
             x, s = batch[0].to(self.device), batch[1].to(self.device)
             output = self.model(x, s)
@@ -143,9 +186,31 @@ class Trainer:
             metrics['elbo'] += output['elbo'].item()
             if has_missing_model:
                 metrics['log_p_s_given_x'] += output['log_p_s_given_x'].item()
+            
+            # Collect data for RMSE computation
+            if self.original_data_available:
+                x_original = batch[2].to(self.device)
+                x_imputed = self.model.impute(x, s, n_samples=self.rmse_n_samples)
+                all_x_original.append(x_original.cpu())
+                all_x_imputed.append(x_imputed.cpu())
+                all_mask.append(s.cpu())
         
         for key in metrics:
             metrics[key] /= len(val_loader)
+        
+        # Compute RMSE
+        if self.original_data_available:
+            x_original_all = torch.cat(all_x_original, dim=0)
+            x_imputed_all = torch.cat(all_x_imputed, dim=0)
+            mask_all = torch.cat(all_mask, dim=0)
+            missing_mask = (1 - mask_all).bool()
+            if missing_mask.sum() > 0:
+                squared_errors = (x_original_all - x_imputed_all) ** 2
+                mse = squared_errors[missing_mask].mean()
+                metrics['rmse'] = torch.sqrt(mse).item()
+            else:
+                metrics['rmse'] = 0.0
+        
         return metrics
     
     def train(
@@ -171,6 +236,9 @@ class Trainer:
             checkpoint_name: Checkpoint filename
         """
         history = {'train_loss': [], 'train_elbo': [], 'val_loss': [], 'val_elbo': []}
+        if self.original_data_available:
+            history['train_rmse'] = []
+            history['val_rmse'] = []
         start_time = time.time()
         
         for epoch in range(n_epochs):
@@ -182,6 +250,10 @@ class Trainer:
             self.writer.add_scalar('Train/Loss', train_metrics['loss'], epoch)
             self.writer.add_scalar('Train/ELBO', train_metrics['elbo'], epoch)
             
+            if self.original_data_available:
+                history['train_rmse'].append(train_metrics['rmse'])
+                self.writer.add_scalar('Train/RMSE', train_metrics['rmse'], epoch)
+            
             # Validate
             if val_loader is not None:
                 val_metrics = self.validate(val_loader)
@@ -190,6 +262,10 @@ class Trainer:
                 
                 self.writer.add_scalar('Val/Loss', val_metrics['loss'], epoch)
                 self.writer.add_scalar('Val/ELBO', val_metrics['elbo'], epoch)
+                
+                if self.original_data_available:
+                    history['val_rmse'].append(val_metrics['rmse'])
+                    self.writer.add_scalar('Val/RMSE', val_metrics['rmse'], epoch)
                 
                 if val_metrics['loss'] < self.best_val_loss:
                     self.best_val_loss = val_metrics['loss']
@@ -205,8 +281,12 @@ class Trainer:
             
             if (epoch + 1) % log_interval == 0:
                 msg = f"Epoch {epoch + 1}/{n_epochs} - Loss: {train_metrics['loss']:.4f}, ELBO: {train_metrics['elbo']:.4f}"
+                if self.original_data_available:
+                    msg += f", RMSE: {train_metrics['rmse']:.4f}"
                 if val_loader:
                     msg += f" | Val Loss: {val_metrics['loss']:.4f}"
+                    if self.original_data_available:
+                        msg += f", Val RMSE: {val_metrics['rmse']:.4f}"
                 print(msg)
         
         print(f"\nTraining completed in {time.time() - start_time:.2f}s")

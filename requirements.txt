@@ -1,0 +1,18 @@
+# Requirements for PyTorch not-MIWAE implementation
+
+# Core dependencies
+torch>=1.9.0
+numpy>=1.19.0
+pandas>=1.2.0
+
+# TensorBoard for logging
+tensorboard>=2.4.0
+
+# Visualization
+matplotlib>=3.3.0
+
+# Optional: for sklearn baselines
+scikit-learn>=0.24.0
+
+# Optional: for loading MNIST
+torchvision>=0.10.0

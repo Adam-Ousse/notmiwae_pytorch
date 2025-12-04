@@ -103,7 +103,9 @@ class NotMIWAE(nn.Module):
         if self.out_dist == 'gauss':
             x_mu, x_std = self.decoder(z)
             p_x_given_z = Normal(x_mu, x_std)
-            x_sample = p_x_given_z.rsample()
+            # Reparameterization: x ~ N(mu, std) = mu + std * eps
+            eps = torch.randn_like(x_mu)
+            x_sample = x_mu + x_std * eps
         else:
             logits = self.decoder(z)
             p_x_given_z = Bernoulli(logits=logits)

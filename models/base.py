@@ -83,7 +83,8 @@ class MissingProcess(nn.Module):
         input_dim: int, 
         missing_process: Literal['selfmasking', 'selfmasking_known', 'linear', 'nonlinear'] = 'selfmasking',
         hidden_dim: int = 64,
-        feature_names: Optional[list] = None
+        feature_names: Optional[list] = None,
+        signs: Optional[torch.Tensor] = None
     ):
         super().__init__()
         self.missing_process = missing_process
@@ -94,6 +95,21 @@ class MissingProcess(nn.Module):
             # Diagonal: each feature's missingness depends only on itself
             self.W = nn.Parameter(torch.ones(1, 1, input_dim))
             self.b = nn.Parameter(torch.zeros(1, 1, input_dim))
+            
+            # For selfmasking_known: register known signs
+            # signs: +1.0 for "High values missing" (negative slope required)
+            #        -1.0 for "Low values missing" (positive slope required)
+            if missing_process == 'selfmasking_known':
+                if signs is None:
+                    # Default: all features have high values missing (paper's setup)
+                    signs = torch.ones(1, 1, input_dim)
+                else:
+                    # Ensure correct shape (1, 1, input_dim)
+                    if signs.dim() == 1:
+                        signs = signs.view(1, 1, -1)
+                    elif signs.dim() == 2:
+                        signs = signs.view(1, 1, -1)
+                self.register_buffer('signs', signs)
             
         elif missing_process == 'linear':
             # Full matrix: missingness can depend on all features
@@ -116,8 +132,16 @@ class MissingProcess(nn.Module):
         if self.missing_process == 'selfmasking':
             return -self.W * (x - self.b)
         elif self.missing_process == 'selfmasking_known':
+            # Constrain magnitude to be positive
             W_positive = F.softplus(self.W)
-            return -W_positive * (x - self.b)
+            
+            # Apply direction based on signs:
+            # If sign is +1 (High->Missing), we want Negative Slope: -1 * W * (x - b)
+            # If sign is -1 (Low->Missing),  we want Positive Slope: +1 * W * (x - b)
+            # Therefore: slope = -signs * W_positive
+            slope = -self.signs * W_positive
+            
+            return slope * (x - self.b)
         elif self.missing_process == 'linear':
             return self.linear(x)
         else:  # nonlinear
@@ -140,31 +164,49 @@ class MissingProcess(nn.Module):
             # Get W and b values
             if self.missing_process == 'selfmasking_known':
                 W = F.softplus(self.W).detach().squeeze().cpu().numpy()
+                signs = self.signs.detach().squeeze().cpu().numpy()
             else:
                 W = self.W.detach().squeeze().cpu().numpy()
+                signs = None
             b = self.b.detach().squeeze().cpu().numpy()
             
             results['W'] = W
             results['b'] = b
+            if signs is not None:
+                results['signs'] = signs
             
             for i in range(self.input_dim):
                 w_i, b_i = W[i], b[i]
                 name = self.feature_names[i]
                 
                 # Interpret the parameters
-                # logit(p(s=1|x)) = -W*(x-b)
-                # When x > b: logit decreases (more likely missing if W > 0)
-                # When x < b: logit increases (less likely missing if W > 0)
+                # For selfmasking: logit(p(s=1|x)) = -W*(x-b)
+                # For selfmasking_known: logit(p(s=1|x)) = -sign*W_positive*(x-b)
+                #   If sign=+1: slope is -W (high values -> missing)
+                #   If sign=-1: slope is +W (low values -> missing)
                 
-                if abs(w_i) < 0.1:
+                if self.missing_process == 'selfmasking_known':
+                    sign_i = signs[i]
+                    effective_w = -sign_i * w_i  # This is the actual slope
+                else:
+                    sign_i = None
+                    effective_w = -w_i
+                
+                if abs(effective_w) < 0.1:
                     direction = "no strong dependency"
                     interp = f"{name}: Nearly random missingness (W≈0)"
-                elif w_i > 0:
+                elif effective_w < 0:  # Negative slope: high values -> negative logit -> missing
                     direction = "high values missing"
-                    interp = f"{name}: Higher values (>{b_i:.2f}) more likely MISSING (W={w_i:.3f})"
-                else:
+                    if self.missing_process == 'selfmasking_known':
+                        interp = f"{name}: Higher values (>{b_i:.2f}) more likely MISSING (W={w_i:.3f}, sign={sign_i:+.0f})"
+                    else:
+                        interp = f"{name}: Higher values (>{b_i:.2f}) more likely MISSING (W={w_i:.3f})"
+                else:  # Positive slope: low values -> negative logit -> missing
                     direction = "low values missing"
-                    interp = f"{name}: Lower values (<{b_i:.2f}) more likely MISSING (W={w_i:.3f})"
+                    if self.missing_process == 'selfmasking_known':
+                        interp = f"{name}: Lower values (<{b_i:.2f}) more likely MISSING (W={w_i:.3f}, sign={sign_i:+.0f})"
+                    else:
+                        interp = f"{name}: Lower values (<{b_i:.2f}) more likely MISSING (W={w_i:.3f})"
                 
                 results['interpretations'].append({
                     'feature': name,

@@ -80,8 +80,36 @@ The model supports several missing mechanisms through `p(s|x)`:
 
 1. **`selfmasking`**: $\text{logit}(p(s_d=1|x)) = -W_d(x_d - b_d)$
 2. **`selfmasking_known`**: Same as above but with $W_d > 0$ (known direction)
+   - Supports directional control via `signs` parameter:
+     - `+1.0`: High values more likely to be missing
+     - `-1.0`: Low values more likely to be missing
 3. **`linear`**: Linear mapping from $x$ to logits
 4. **`nonlinear`**: MLP mapping from $x$ to logits
+
+#### Directional Missingness Control (New!)
+
+For `selfmasking_known`, you can specify the direction of missingness per feature:
+
+```python
+import torch
+
+# Define directional patterns for 4 features
+signs = torch.tensor([
+    +1.0,  # Feature 0: high values → missing (e.g., sensor saturation)
+    +1.0,  # Feature 1: high values → missing
+    -1.0,  # Feature 2: low values → missing (e.g., below detection threshold)
+    -1.0   # Feature 3: low values → missing
+])
+
+model = NotMIWAE(
+    input_dim=4,
+    latent_dim=10,
+    missing_process='selfmasking_known',
+    signs=signs  # Optional: defaults to all +1.0 (high→missing)
+)
+```
+
+See `demo_signs.py` for a complete demonstration.
 
 ## Files
 

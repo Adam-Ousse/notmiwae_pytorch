@@ -16,7 +16,8 @@ def imputation_rmse(
     n_samples: int = 1000,
     batch_size: int = 100,
     device: Optional[torch.device] = None,
-    verbose: bool = False
+    verbose: bool = False,
+    solver= None # l1 or l2
 ) -> Tuple[float, np.ndarray]:
     """
     Compute imputation RMSE for missing values.
@@ -58,8 +59,10 @@ def imputation_rmse(
             end_idx = min(i + batch_size, n)
             x_batch = x_filled[i:end_idx].to(device)
             s_batch = mask[i:end_idx].to(device)
-            
-            x_imp = model.impute(x_batch, s_batch, n_samples=n_samples)
+            if solver:
+                x_imp = model.impute(x_batch, s_batch, n_samples=n_samples, solver=solver)
+            else :
+                x_imp = model.impute(x_batch, s_batch, n_samples=n_samples)
             x_imputed_list.append(x_imp.cpu())
             
             if verbose and i % 500 == 0:
@@ -79,73 +82,6 @@ def imputation_rmse(
     
     return rmse, x_imputed.numpy()
 
-
-def introduce_mnar_missing(
-    X: np.ndarray,
-    missing_rate: float = 0.5
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """
-    Introduce MNAR (Missing Not At Random) missing values.
-    
-    Following the experimental setup in the not-MIWAE paper:
-    Values above the mean in the first D/2 dimensions are missing.
-    
-    Args:
-        X: Complete data of shape (N, D)
-        missing_rate: Not used directly, the mechanism is deterministic
-        
-    Returns:
-        X_nan: Data with NaN for missing values
-        X_filled: Data with 0 for missing values  
-        mask: Binary mask (1=observed, 0=missing)
-    """
-    N, D = X.shape
-    X_nan = X.copy()
-    
-    # MNAR in first D/2 dimensions
-    n_miss_cols = D // 2
-    mean = np.mean(X_nan[:, :n_miss_cols], axis=0)
-    
-    # Values above mean are missing
-    mask_missing = X_nan[:, :n_miss_cols] > mean
-    X_nan[:, :n_miss_cols][mask_missing] = np.nan
-    
-    # Create filled version and mask
-    X_filled = X_nan.copy()
-    X_filled[np.isnan(X_nan)] = 0
-    mask = (~np.isnan(X_nan)).astype(np.float32)
-    
-    return X_nan, X_filled, mask
-
-
-def introduce_mcar_missing(
-    X: np.ndarray,
-    missing_rate: float = 0.3
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """
-    Introduce MCAR (Missing Completely At Random) missing values.
-    
-    Args:
-        X: Complete data of shape (N, D)
-        missing_rate: Proportion of values to be missing
-        
-    Returns:
-        X_nan: Data with NaN for missing values
-        X_filled: Data with 0 for missing values
-        mask: Binary mask (1=observed, 0=missing)
-    """
-    N, D = X.shape
-    
-    # Create random mask
-    mask = np.random.binomial(1, 1 - missing_rate, size=(N, D)).astype(np.float32)
-    
-    X_nan = X.copy()
-    X_nan[mask == 0] = np.nan
-    
-    X_filled = X.copy()
-    X_filled[mask == 0] = 0
-    
-    return X_nan, X_filled, mask
 
 
 def standardize(
@@ -218,7 +154,8 @@ def impute(
     n_samples: int = 1000,
     batch_size: int = 64,
     device: Optional[torch.device] = None,
-    verbose: bool = False
+    verbose: bool = False,
+    solver = None # l1 or l2
 ) -> np.ndarray:
     """
     Impute missing values using a trained model.
@@ -267,7 +204,10 @@ def impute(
             s_batch = mask[i:end_idx].to(device)
             
             # Model's impute method already preserves observed values
-            x_imp = model.impute(x_batch, s_batch, n_samples=n_samples)
+            if solver:
+                x_imp = model.impute(x_batch, s_batch, n_samples=n_samples, solver=solver)
+            else:
+                x_imp = model.impute(x_batch, s_batch, n_samples=n_samples)
             x_imputed_list.append(x_imp.cpu())
             
             if verbose:

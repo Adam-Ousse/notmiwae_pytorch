@@ -12,9 +12,13 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Normal, Bernoulli
 import numpy as np
-from typing import Optional, Literal
+from typing import Optional, Literal, Union
 
-from .base import Encoder, GaussianDecoder, BernoulliDecoder, MissingProcess
+from .base import (
+    Encoder, Encoder_CNN, 
+    GaussianDecoder, GaussianDecoder_CNN, BernoulliDecoder, 
+    BaseMissingProcess, MissingProcess
+)
 
 
 class NotMIWAE(nn.Module):
@@ -29,11 +33,27 @@ class NotMIWAE(nn.Module):
         hidden_dim: Dimension of hidden layers
         n_samples: Number of importance samples (K)
         out_dist: Output distribution ('gauss' or 'bern')
-        missing_process: Type of missing mechanism 
-            ('selfmasking', 'selfmasking_known', 'linear', 'nonlinear')
+        missing_process: Either a string ('selfmasking', 'selfmasking_known_signs', 'linear', 'nonlinear')
+                        or a custom BaseMissingProcess instance
         feature_names: Optional list of feature names for interpretation
         signs: Optional tensor of shape (input_dim,) with +1.0 for high-values-missing,
-               -1.0 for low-values-missing. Only used with 'selfmasking_known'.
+               -1.0 for low-values-missing. Only used with 'selfmasking_known_signs'.
+        architecture: 'MLP' for tabular data or 'CNN' for 32x32 grayscale images
+        
+    Example with custom missing process:
+        class MyMissingProcess(BaseMissingProcess):
+            def __init__(self, input_dim, temperature=1.0, **kwargs):
+                super().__init__(input_dim, **kwargs)
+                self.temperature = temperature
+                self.threshold = nn.Parameter(torch.zeros(input_dim))
+                
+            def forward(self, x):
+                return (x - self.threshold) / self.temperature
+                
+        model = NotMIWAE(
+            input_dim=10,
+            missing_process=MyMissingProcess(10, temperature=0.5)
+        )
     """
     
     def __init__(
@@ -43,9 +63,10 @@ class NotMIWAE(nn.Module):
         hidden_dim: int = 128,
         n_samples: int = 20,
         out_dist: Literal['gauss', 'bern'] = 'gauss',
-        missing_process: Literal['selfmasking', 'selfmasking_known', 'linear', 'nonlinear'] = 'selfmasking',
+        missing_process: Union[Literal['selfmasking', 'selfmasking_known_signs', 'linear', 'nonlinear'], BaseMissingProcess] = 'selfmasking',
         feature_names: Optional[list] = None,
-        signs: Optional[torch.Tensor] = None
+        signs: Optional[torch.Tensor] = None,
+        architecture: Literal['MLP', 'CNN'] = 'MLP'
     ):
         super().__init__()
         
@@ -54,26 +75,41 @@ class NotMIWAE(nn.Module):
         self.hidden_dim = hidden_dim
         self.n_samples = n_samples
         self.out_dist = out_dist
-        self.missing_process_type = missing_process
         self.feature_names = feature_names
+        self.architecture = architecture
         
         # Encoder q(z|x)
-        self.encoder = Encoder(input_dim, hidden_dim, latent_dim)
+        if architecture == 'CNN':
+            self.encoder = Encoder_CNN(latent_dim)
+        else:
+            self.encoder = Encoder(input_dim, hidden_dim, latent_dim)
         
         # Decoder p(x|z)
-        if out_dist == 'gauss':
-            self.decoder = GaussianDecoder(latent_dim, hidden_dim, input_dim)
+        if architecture == 'CNN':
+            if out_dist != 'gauss':
+                raise ValueError("CNN architecture currently only supports Gaussian output distribution")
+            self.decoder = GaussianDecoder_CNN(latent_dim)
         else:
-            self.decoder = BernoulliDecoder(latent_dim, hidden_dim, input_dim)
+            if out_dist == 'gauss':
+                self.decoder = GaussianDecoder(latent_dim, hidden_dim, input_dim)
+            else:
+                self.decoder = BernoulliDecoder(latent_dim, hidden_dim, input_dim)
             
-        # Missing process p(s|x)
-        self.missing_model = MissingProcess(
-            input_dim, 
-            missing_process, 
-            hidden_dim=hidden_dim // 2,
-            feature_names=feature_names,
-            signs=signs
-        )
+        # Missing process p(s|x) - can be string or custom BaseMissingProcess
+        if isinstance(missing_process, BaseMissingProcess):
+            # User provided a custom missing process instance
+            self.missing_model = missing_process
+            self.missing_process_type = missing_process.__class__.__name__
+        else:
+            # Use factory function to create built-in missing process
+            self.missing_model = MissingProcess(
+                input_dim, 
+                missing_process, 
+                hidden_dim=hidden_dim // 2,
+                feature_names=feature_names,
+                signs=signs
+            )
+            self.missing_process_type = missing_process
         
         # Prior p(z)
         self.register_buffer('prior_mu', torch.zeros(1))
@@ -101,7 +137,7 @@ class NotMIWAE(nn.Module):
         Compute importance weights and related quantities for ELBO/imputation.
         
         Args:
-            x: Data with missing values filled (batch_size, input_dim)
+            x: Flattened data with missing values filled (batch_size, input_dim)
             s: Observation mask (batch_size, input_dim)
             z: Sampled latent variables (batch_size, n_samples, latent_dim)
             q_mu: Encoder mean (batch_size, latent_dim)
@@ -111,31 +147,53 @@ class NotMIWAE(nn.Module):
             
         Returns:
             Dictionary with log_w (importance weights), and optionally x_mu, x_sample, p_x_given_z
+            
+        Shape flow:
+            z: (batch, n_samples, latent_dim)
+            For CNN: flatten -> (batch*n_samples, latent_dim) -> decoder -> (batch*n_samples, 1024)
+                     -> unflatten -> (batch, n_samples, 1024)
+            For MLP: (batch, n_samples, latent_dim) -> decoder -> (batch, n_samples, input_dim)
         """
-        # Decode
-        if self.out_dist == 'gauss':
-            x_mu, x_std = self.decoder(z)
-            p_x_given_z = Normal(x_mu, x_std)
-            # Reparameterization: x ~ N(mu, std) = mu + std * eps
-            eps = torch.randn_like(x_mu)
-            x_sample = x_mu + x_std * eps
+        batch_size = z.size(0)
+        
+        # Decode: flatten z for CNN, decoder outputs are already flattened (batch*n_samples, 1024)
+        if self.architecture == 'CNN':
+            z_flat = z.flatten(start_dim=0, end_dim=1)  # (batch*n_samples, latent_dim)
         else:
-            logits = self.decoder(z)
+            z_flat = z
+            
+        if self.out_dist == 'gauss':
+            x_mu, x_std = self.decoder(z_flat)
+            
+            # Unflatten back to (batch, n_samples, input_dim) for CNN
+            if self.architecture == 'CNN':
+                x_mu = x_mu.unflatten(0, (batch_size, n_samples))
+                x_std = x_std.unflatten(0, (batch_size, n_samples))
+                
+            p_x_given_z = Normal(x_mu, x_std)
+            x_sample = x_mu + x_std * torch.randn_like(x_mu)  # Reparameterization
+        else:
+            logits = self.decoder(z_flat)
+            
+            # Unflatten back to (batch, n_samples, input_dim) for CNN
+            if self.architecture == 'CNN':
+                logits = logits.unflatten(0, (batch_size, n_samples))
+                
             p_x_given_z = Bernoulli(logits=logits)
             x_mu = torch.sigmoid(logits)
             x_sample = p_x_given_z.sample().float()
         
-        # Expand x and s for K samples
+        # Expand x and s to match n_samples: (batch, input_dim) -> (batch, n_samples, input_dim)
         x_expanded = x.unsqueeze(1).expand(-1, n_samples, -1)
         s_expanded = s.unsqueeze(1).expand(-1, n_samples, -1)
         
-        # log p(x_obs|z) - only observed dimensions
+        # log p(x_obs|z) - only observed dimensions contribute
         log_p_x_given_z = (s_expanded * p_x_given_z.log_prob(x_expanded)).sum(dim=-1)
         
-        # Mix observed x with sampled x for missing values
+        # Mix observed x with sampled x for missing values (for missing process)
         x_mixed = x_sample * (1 - s_expanded) + x_expanded * s_expanded
         
-        # log p(s|x) - missing process
+        # log p(s|x) - missing process operates on flattened data (batch, n_samples, 1024)
         miss_logits = self.missing_model(x_mixed)
         log_p_s_given_x = Bernoulli(logits=miss_logits).log_prob(s_expanded).sum(dim=-1)
         
@@ -170,20 +228,37 @@ class NotMIWAE(nn.Module):
         
         return result
     
+    def _prepare_encoder_input(self, x: torch.Tensor) -> torch.Tensor:
+        """Reshape input for encoder if needed (CNN expects 4D tensor)."""
+        if self.architecture == 'CNN':
+            # Reshape flattened (batch, 1024) -> image (batch, 1, 32, 32)
+            return x.view(-1, 1, 32, 32)
+        return x
+    
     def forward(self, x: torch.Tensor, s: torch.Tensor, n_samples: Optional[int] = None) -> dict:
         """
         Forward pass.
         
         Args:
             x: Data with missing values filled (batch_size, input_dim)
+               For CNN: flattened image (batch_size, 1024)
             s: Observation mask, 1=observed, 0=missing (batch_size, input_dim)
             n_samples: Number of importance samples
+            
+        Shape flow for CNN:
+            x: (batch, 1024) -> reshape -> (batch, 1, 32, 32)
+            encoder: (batch, 1, 32, 32) -> mu, logvar: (batch, latent_dim)
+            z: (batch, n_samples, latent_dim) -> reshape -> (batch*n_samples, latent_dim)
+            decoder: (batch*n_samples, latent_dim) -> mu, std: (batch*n_samples, 1024)
+            reshape back: (batch, n_samples, 1024)
+            missing_process: (batch, n_samples, 1024) -> logits: (batch, n_samples, 1024)
         """
         if n_samples is None:
             n_samples = self.n_samples
             
-        # Encode
-        q_mu, q_logvar = self.encoder(x)
+        # Encode: reshape for CNN if needed
+        encoder_input = self._prepare_encoder_input(x)
+        q_mu, q_logvar = self.encoder(encoder_input)
         z = self.reparameterize(q_mu, q_logvar, n_samples)
         
         # Compute importance weights and related quantities
@@ -238,8 +313,9 @@ class NotMIWAE(nn.Module):
         """
         self.eval()
         with torch.no_grad():
-            # Encode
-            q_mu, q_logvar = self.encoder(x)
+            # Encode: reshape for CNN if needed
+            encoder_input = self._prepare_encoder_input(x)
+            q_mu, q_logvar = self.encoder(encoder_input)
             z = self.reparameterize(q_mu, q_logvar, n_samples)
             
             # Compute importance weights

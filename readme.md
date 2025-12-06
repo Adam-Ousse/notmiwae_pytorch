@@ -45,7 +45,7 @@ model = NotMIWAE(
     latent_dim=5,
     hidden_dim=128,
     n_samples=20,
-    missing_process='selfmasking_known',
+    missing_process='selfmasking_known_signs',
     feature_names=['feat1', 'feat2', ...]  # Optional
 )
 
@@ -79,7 +79,7 @@ where:
 The model supports several missing mechanisms through `p(s|x)`:
 
 1. **`selfmasking`**: $\text{logit}(p(s_d=1|x)) = -W_d(x_d - b_d)$
-2. **`selfmasking_known`**: Same as above but with $W_d > 0$ (known direction)
+2. **`selfmasking_known_signs`**: Same as above but with $W_d > 0$ (known direction)
    - Supports directional control via `signs` parameter:
      - `+1.0`: High values more likely to be missing
      - `-1.0`: Low values more likely to be missing
@@ -88,7 +88,7 @@ The model supports several missing mechanisms through `p(s|x)`:
 
 #### Directional Missingness Control (New!)
 
-For `selfmasking_known`, you can specify the direction of missingness per feature:
+For `selfmasking_known_signs`, you can specify the direction of missingness per feature:
 
 ```python
 import torch
@@ -104,7 +104,7 @@ signs = torch.tensor([
 model = NotMIWAE(
     input_dim=4,
     latent_dim=10,
-    missing_process='selfmasking_known',
+    missing_process='selfmasking_known_signs',
     signs=signs  # Optional: defaults to all +1.0 (high→missing)
 )
 ```

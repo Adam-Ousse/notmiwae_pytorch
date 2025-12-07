@@ -71,35 +71,13 @@ class Trainer:
         
         # TensorBoard writer
         self.writer = SummaryWriter(log_dir=str(self.log_dir))
-        self._graph_logged = False
         
         # Training state
         self.global_step = 0
         self.best_val_loss = float('inf')
         self.epochs_without_improvement = 0
     
-    def log_model_graph(self, x: torch.Tensor, s: torch.Tensor):
-        """Log model graph to TensorBoard."""
-        if self._graph_logged:
-            return
-            
-        try:
-            class ModelWrapper(nn.Module):
-                def __init__(self, model):
-                    super().__init__()
-                    self.model = model
-                def forward(self, inputs):
-                    return self.model(inputs[0], inputs[1])['loss']
-            
-            wrapper = ModelWrapper(self.model)
-            wrapper.eval()
-            self.writer.add_graph(wrapper, [(x[:2].to(self.device), s[:2].to(self.device))])
-            self._graph_logged = True
-            print(f"Model graph logged to TensorBoard: {self.log_dir}")
-        except Exception as e:
-            print(f"Warning: Could not log model graph: {e}")
-            self._graph_logged = True
-        
+    
     def train_epoch(self, train_loader: DataLoader) -> Dict[str, float]:
         """Train for one epoch."""
         self.model.train()
@@ -117,9 +95,7 @@ class Trainer:
         
         for batch in train_loader:
             x, s = batch[0].to(self.device), batch[1].to(self.device)
-            
-            if not self._graph_logged:
-                self.log_model_graph(x, s)
+        
             
             self.optimizer.zero_grad()
             output = self.model(x, s)

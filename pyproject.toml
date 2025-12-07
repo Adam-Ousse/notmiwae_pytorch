@@ -7,7 +7,7 @@ name = "notmiwae-pytorch"
 version = "0.1.0"
 description = "Not-MIWAE: Deep Generative Modelling with Missing Not at Random Data"
 readme = "readme.md"
-license = {text = "MIT"}
+license = "MIT"
 requires-python = ">=3.8"
 authors = [
     {name = "Adam Gassem", email = "adamgassem.fr@gmail.com"}
@@ -19,12 +19,12 @@ keywords = [
     "imputation",
     "variational-autoencoder",
     "MNAR",
-    "MIWAE"
+    "MIWAE",
+    "impute"
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",

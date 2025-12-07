@@ -20,7 +20,15 @@ The not-MIWAE extends the Missing Data Importance Weighted Autoencoder (MIWAE) b
 ## Installation
 
 ```bash
-pip install -r requirements.txt
+pip install notmiwae-pytorch
+```
+
+Or install from source:
+
+```bash
+git clone https://github.com/Adam-Ousse/notmiwae_pytorch.git
+cd notmiwae_pytorch
+pip install -e .
 ```
 
 ## Quick Start
@@ -76,7 +84,7 @@ where:
 
 ### Missing Process Models
 
-The model supports several missing mechanisms through `p(s|x)`:
+The model supports several missing mechanisms through `p(s|x)`. **The more prior knowledge you have about the missing mechanism in your data, the more accurate the imputations will be.** Choose the model that best matches your assumptions:
 
 1. **`selfmasking`**: $\text{logit}(p(s_d=1|x)) = -W_d(x_d - b_d)$
 2. **`selfmasking_known_signs`**: Same as above but with $W_d > 0$ (known direction)
@@ -86,7 +94,63 @@ The model supports several missing mechanisms through `p(s|x)`:
 3. **`linear`**: Linear mapping from $x$ to logits
 4. **`nonlinear`**: MLP mapping from $x$ to logits
 
-#### Directional Missingness Control (New!)
+### Custom Missing Process
+
+You can create your own missing process by inheriting from `BaseMissingProcess`:
+
+```python
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from notmiwae_pytorch import NotMIWAE, BaseMissingProcess
+
+class SinusoidalMissingProcess(BaseMissingProcess):
+    """
+    Custom missing process with sinusoidal pattern.
+    Captures non-monotonic missingness where certain value ranges
+    are more/less likely to be observed.
+    """
+    
+    def __init__(self, input_dim, init_frequency=1.0, **kwargs):
+        super().__init__(input_dim, **kwargs)
+        
+        # Learnable parameters
+        self.amplitude = nn.Parameter(torch.ones(1, 1, input_dim))
+        self.frequency = nn.Parameter(torch.full((1, 1, input_dim), init_frequency))
+        self.phase = nn.Parameter(torch.zeros(1, 1, input_dim))
+        self.bias = nn.Parameter(torch.zeros(1, 1, input_dim))
+        
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Compute logits for p(s=1|x)."""
+        amp = F.softplus(self.amplitude)
+        freq = F.softplus(self.frequency)
+        return amp * torch.sin(freq * x + self.phase) + self.bias
+    
+    def interpret(self, verbose=True):
+        """Interpret learned parameters."""
+        results = {
+            'amplitude': F.softplus(self.amplitude).detach().cpu().numpy(),
+            'frequency': F.softplus(self.frequency).detach().cpu().numpy(),
+        }
+        if verbose:
+            print(f"Learned frequency: {results['frequency'].mean():.3f}")
+        return results
+
+# Use custom missing process
+custom_missing = SinusoidalMissingProcess(input_dim=10)
+model = NotMIWAE(
+    input_dim=10,
+    missing_process=custom_missing  # Pass instance instead of string
+)
+```
+
+The `BaseMissingProcess` requires implementing:
+- `forward(x)`: Returns logits for $p(s=1|x)$
+- `interpret(verbose)` (optional): Returns dict with learned parameters
+
+See `notebooks/demo_notmiwae_sinusoidal.ipynb` for a complete example.
+
+#### Directional Missingness Control 
 
 For `selfmasking_known_signs`, you can specify the direction of missingness per feature:
 

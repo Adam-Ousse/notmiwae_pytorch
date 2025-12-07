@@ -1,5 +1,5 @@
 """
-Test signs parameter for selfmasking_known missing process.
+Test signs parameter for selfmasking_known_signs missing process.
 """
 
 import torch
@@ -32,7 +32,7 @@ def test_signs_parameter():
         latent_dim=10,
         hidden_dim=64,
         n_samples=20,
-        missing_process='selfmasking_known',
+        missing_process='selfmasking_known_signs',
         feature_names=[f'Feature_{i}' for i in range(input_dim)],
         signs=signs
     )

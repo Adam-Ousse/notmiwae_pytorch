@@ -82,7 +82,7 @@ class GaussianDecoder(nn.Module):
 
 
 class StudentTDecoder(nn.Module):
-    """Student-t decoder p(x|z) with learnable degrees of freedom."""
+    """Student-t decoder p(x|z) with learnable degrees of freedom (scalar, shared across features)."""
     
     def __init__(self, latent_dim: int, hidden_dim: int, output_dim: int):
         super().__init__()
@@ -94,15 +94,22 @@ class StudentTDecoder(nn.Module):
         )
         self.fc_mu = nn.Linear(hidden_dim, output_dim)
         self.fc_scale = nn.Linear(hidden_dim, output_dim)
-        self.fc_df = nn.Linear(hidden_dim, output_dim)
+        # Single scalar df parameter shared across all features
+        self.df_raw = nn.Parameter(torch.tensor(5.0))  # init to 5 for moderate tails / one value for all features
         
     def forward(self, z: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Return (mu, scale, df) for Student-t distribution."""
+        """Return (mu, scale, df) for Student-t distribution.
+        
+        Returns:
+            mu: shape (batch or batch*n_samples, output_dim)
+            scale: shape (batch or batch*n_samples, output_dim)
+            df: scalar degrees of freedom broadcasted to all features
+        """
         h = self.backbone(z)
         mu = self.fc_mu(h)
         scale = F.softplus(self.fc_scale(h)) + 1e-6
-        # df in range [1+eps, inf), allows heavy tails
-        df = F.softplus(self.fc_df(h)) + 1.0  # ensures df >= 1
+        # df in range [1, inf), ensures stable Student-t
+        df = F.softplus(self.df_raw) + 1.0
         return mu, scale, df
 
 

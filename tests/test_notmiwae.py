@@ -3,8 +3,7 @@ Test script to verify NotMIWAE works correctly with the refactored code.
 """
 
 import torch
-from models.notmiwae import NotMIWAE
-from models.miwae import MIWAE
+from notmiwae_pytorch.models import NotMIWAE
 
 # Test parameters
 batch_size = 32
@@ -22,7 +21,7 @@ model = NotMIWAE(
     latent_dim=latent_dim,
     hidden_dim=64,
     n_samples=20,
-    out_dist='gauss',
+    out_dist='student_t',
     missing_process='selfmasking'
 ).to(device)
 

@@ -5,7 +5,7 @@ Base components for MIWAE models: Encoder, Decoders, Missing Process.
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.distributions import Normal, Bernoulli
+from torch.distributions import Normal, Bernoulli, StudentT
 import numpy as np
 from typing import Optional, Tuple, Literal
 
@@ -79,6 +79,31 @@ class GaussianDecoder(nn.Module):
         mu = self.fc_mu(h)
         std = F.softplus(self.fc_std(h)) + 1e-6
         return mu, std
+
+
+class StudentTDecoder(nn.Module):
+    """Student-t decoder p(x|z) with learnable degrees of freedom."""
+    
+    def __init__(self, latent_dim: int, hidden_dim: int, output_dim: int):
+        super().__init__()
+        self.backbone = nn.Sequential(
+            nn.Linear(latent_dim, hidden_dim),
+            nn.Tanh(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.Tanh()
+        )
+        self.fc_mu = nn.Linear(hidden_dim, output_dim)
+        self.fc_scale = nn.Linear(hidden_dim, output_dim)
+        self.fc_df = nn.Linear(hidden_dim, output_dim)
+        
+    def forward(self, z: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Return (mu, scale, df) for Student-t distribution."""
+        h = self.backbone(z)
+        mu = self.fc_mu(h)
+        scale = F.softplus(self.fc_scale(h)) + 1e-6
+        # df in range [1+eps, inf), allows heavy tails
+        df = F.softplus(self.fc_df(h)) + 1.0  # ensures df >= 1
+        return mu, scale, df
 
 
 class BernoulliDecoder(nn.Module):

@@ -10,13 +10,13 @@ Extends MIWAE by explicitly modeling the missing data mechanism p(s|x).
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.distributions import Normal, Bernoulli
+from torch.distributions import Normal, Bernoulli, StudentT
 import numpy as np
 from typing import Optional, Literal, Union
 
 from .base import (
     Encoder, Encoder_CNN, 
-    GaussianDecoder, GaussianDecoder_CNN, BernoulliDecoder, 
+    GaussianDecoder, GaussianDecoder_CNN, StudentTDecoder, BernoulliDecoder, 
     BaseMissingProcess, MissingProcess
 )
 
@@ -32,7 +32,7 @@ class NotMIWAE(nn.Module):
         latent_dim: Dimension of the latent space  
         hidden_dim: Dimension of hidden layers
         n_samples: Number of importance samples (K)
-        out_dist: Output distribution ('gauss' or 'bern')
+        out_dist: Output distribution ('gauss', 'student_t', or 'bern')
         missing_process: Either a string ('selfmasking', 'selfmasking_known_signs', 'linear', 'nonlinear')
                         or a custom BaseMissingProcess instance
         feature_names: Optional list of feature names for interpretation
@@ -62,7 +62,7 @@ class NotMIWAE(nn.Module):
         latent_dim: int = 50,
         hidden_dim: int = 128,
         n_samples: int = 20,
-        out_dist: Literal['gauss', 'bern'] = 'gauss',
+        out_dist: Literal['gauss', 'student_t', 'bern'] = 'gauss',
         missing_process: Union[Literal['selfmasking', 'selfmasking_known_signs', 'linear', 'nonlinear'], BaseMissingProcess] = 'selfmasking',
         feature_names: Optional[list] = None,
         signs: Optional[torch.Tensor] = None,
@@ -92,6 +92,8 @@ class NotMIWAE(nn.Module):
         else:
             if out_dist == 'gauss':
                 self.decoder = GaussianDecoder(latent_dim, hidden_dim, input_dim)
+            elif out_dist == 'student_t':
+                self.decoder = StudentTDecoder(latent_dim, hidden_dim, input_dim)
             else:
                 self.decoder = BernoulliDecoder(latent_dim, hidden_dim, input_dim)
             
@@ -172,6 +174,12 @@ class NotMIWAE(nn.Module):
                 
             p_x_given_z = Normal(x_mu, x_std)
             x_sample = x_mu + x_std * torch.randn_like(x_mu)  # Reparameterization
+        elif self.out_dist == 'student_t':
+            x_mu, x_scale, x_df = self.decoder(z_flat)
+            
+            # Student-t only for MLP, no CNN unflatten needed
+            p_x_given_z = StudentT(df=x_df, loc=x_mu, scale=x_scale)
+            x_sample = p_x_given_z.rsample()  # rsample for differentiability
         else:
             logits = self.decoder(z_flat)
             
@@ -335,8 +343,12 @@ class NotMIWAE(nn.Module):
                 
             elif solver == 'l1':
                 # L1 loss: Conditional median via CDF estimation
-                # For Gaussian: compute weighted quantile at 0.5
+                # For Gaussian/Student-t: compute weighted quantile at 0.5
                 if self.out_dist == 'gauss':
+                    x_imputed = self._compute_conditional_median_gaussian(
+                        x_mu, weights_info['p_x_given_z'], alpha
+                    )
+                elif self.out_dist == 'student_t':
                     x_imputed = self._compute_conditional_median_gaussian(
                         x_mu, weights_info['p_x_given_z'], alpha
                     )

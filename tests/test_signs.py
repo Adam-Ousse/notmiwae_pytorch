@@ -4,7 +4,7 @@ Test signs parameter for selfmasking_known_signs missing process.
 
 import torch
 import numpy as np
-from models.notmiwae import NotMIWAE
+from notmiwae_pytorch import NotMIWAE
 
 def test_signs_parameter():
     """Test that signs parameter correctly controls directional missingness."""

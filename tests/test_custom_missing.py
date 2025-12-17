@@ -1,8 +1,8 @@
 """Test custom missing process functionality."""
 import torch
 import torch.nn as nn
-from models.base import BaseMissingProcess, MissingProcess, SelfMaskingKnownSignsProcess
-from models.notmiwae import NotMIWAE
+from notmiwae_pytorch import BaseMissingProcess, MissingProcess, SelfMaskingKnownSignsProcess
+from notmiwae_pytorch import NotMIWAE
 
 
 # Test 1: Built-in missing process (backward compatible)

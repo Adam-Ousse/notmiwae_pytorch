@@ -4,6 +4,8 @@ Models module for not-MIWAE PyTorch implementation.
 
 from .notmiwae import NotMIWAE
 from .miwae import MIWAE
+from .supnotmiwae import SupNotMIWAE, PredictionHead
+from .supmiwae import SupMIWAE
 from .base import (
     Encoder, Encoder_CNN, 
     GaussianDecoder, GaussianDecoder_CNN, BernoulliDecoder,
@@ -18,7 +20,10 @@ from .base import (
 
 __all__ = [
     'NotMIWAE',
-    'MIWAE', 
+    'MIWAE',
+    'SupNotMIWAE',
+    'SupMIWAE',
+    'PredictionHead',
     'Encoder',
     'Encoder_CNN',
     'GaussianDecoder',

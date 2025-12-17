@@ -7,7 +7,7 @@ should cause missingness for each feature using the selfmasking_known_signs mech
 
 import torch
 import numpy as np
-from models.notmiwae import NotMIWAE
+from notmiwae_pytorch import NotMIWAE
 
 def demo_directional_missingness():
     """

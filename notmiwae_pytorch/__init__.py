@@ -54,7 +54,7 @@ Example usage:
     x_imputed = model.impute(x_filled, mask, n_samples=1000)
 """
 
-from .models import NotMIWAE, MIWAE, BaseMissingProcess
+from .models import NotMIWAE, MIWAE, SupNotMIWAE, SupMIWAE, PredictionHead, BaseMissingProcess
 from .trainer import Trainer
 from . import utils
 
@@ -63,6 +63,9 @@ __version__ = "1.0.0"
 __all__ = [
     'NotMIWAE',
     'MIWAE',
+    'SupNotMIWAE',
+    'SupMIWAE',
+    'PredictionHead',
     'BaseMissingProcess',
     'Trainer',
     'utils'

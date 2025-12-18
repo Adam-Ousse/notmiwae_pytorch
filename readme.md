@@ -16,6 +16,7 @@ ENSTA Paris · ENS Paris-Saclay, France
 ewerthon.melzani@ensta.fr · ewerthon.melzani@ip-paris.fr  
 ENSTA Paris · ENS Paris-Saclay, France
 
+Poster : [Poster_notmiwae.pdf](Poster_notmiwae.pdf)
 ---
 
 ## Overview
@@ -37,6 +38,10 @@ Beyond reviewing and reproducing the not-MIWAE framework, this work makes the fo
 2. **Supervised MNAR Extension (sup-not-MIWAE)**: We propose a supervised extension obtained by faithful probabilistic integration of not-MIWAE and supMIWAE within the same modeling framework, providing a transparent supervised MNAR baseline.
 
 3. **Extended Experiments**: We reproduce and extend the original experimental study by evaluating not-MIWAE on high-dimensional image data (CelebA dataset) with MNAR clipping experiments.
+
+   ![CelebA Imputation Results](figures/figure_celebA.png)
+
+   *Figure 1: Image imputation on CelebA dataset. Left to right: Original images, Missing regions (red areas indicate clipped/missing pixels), Imputed results from not-MIWAE. The model successfully reconstructs missing facial regions under MNAR clipping patterns without knowing the original missing process parameters.*
 
 4. **Optimal Transport Interpretation**: We introduce an optimal-transport interpretation of imputation under MNAR, recasting classical loss-based point estimators as Wasserstein projections onto Dirac measures.
 

@@ -180,7 +180,7 @@ class NotMIWAE(nn.Module):
             # Student-t only for MLP, no CNN unflatten needed
             p_x_given_z = StudentT(df=x_df, loc=x_mu, scale=x_scale)
             x_sample = p_x_given_z.rsample()  # rsample for differentiability
-        else:
+        else: #bernoulli
             logits = self.decoder(z_flat)
             
             # Unflatten back to (batch, n_samples, input_dim) for CNN

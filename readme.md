@@ -16,6 +16,11 @@ ENSTA Paris · ENS Paris-Saclay, France
 ewerthon.melzani@ensta.fr · ewerthon.melzani@ip-paris.fr  
 ENSTA Paris · ENS Paris-Saclay, France
 
+*(Mentor and reviewer of code and mathematical theory)*
+**João Pedro**  
+joao-pedro.farias@ensta.fr  
+ENSTA Paris 
+
 Poster : [Poster_notmiwae.pdf](Poster_notmiwae.pdf)
 ---
 
@@ -427,7 +432,7 @@ This implementation follows the license of the original repository.
 
 ## Acknowledgments
 
-This project was developed as part of the **Probabilistic Graphical Models and Deep Generative Models** course. We thank the course instructors and the original authors of not-MIWAE and supMIWAE for their foundational work.Test COMMIT
+This project was developed as part of the **Probabilistic Graphical Models and Deep Generative Models** course. We thank the course instructors and the original authors of not-MIWAE and supMIWAE for their foundational work.The entire team would like to acknowledge João Pedro Farias Pinheiro Mello for the mentorship with his solid math theorical background and heavy experience on hands for the code part, always trying to achieve the SOTA in performance:
 
 ---
 

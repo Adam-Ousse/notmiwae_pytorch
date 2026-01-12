@@ -427,7 +427,7 @@ This implementation follows the license of the original repository.
 
 ## Acknowledgments
 
-This project was developed as part of the **Probabilistic Graphical Models and Deep Generative Models** course. We thank the course instructors and the original authors of not-MIWAE and supMIWAE for their foundational work.
+This project was developed as part of the **Probabilistic Graphical Models and Deep Generative Models** course. We thank the course instructors and the original authors of not-MIWAE and supMIWAE for their foundational work.Test COMMIT
 
 ---
 
